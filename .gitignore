@@ -1,0 +1,27 @@
+# local reference material (original study code, real definition files) - never public
+_private/
+
+# outputs
+output/
+*.sas7bdat
+*.sas7bcat
+*.lst
+*.log
+sas/generated/*_from_sas.sas
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+~$*.xlsx
