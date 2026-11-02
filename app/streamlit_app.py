@@ -50,13 +50,44 @@ def analyse(rules: bytes, raw: bytes, log: bytes | None, use_log: bool):
 
 
 st.set_page_config(page_title="CRF Rule Engine", page_icon="🩺", layout="wide")
-st.title("CRF Rule Engine")
-st.caption("Plausibility checks for paper-CRF studies, maintained in Excel instead of code. "
-           "**Runs entirely in your browser - no file leaves this computer.**")
 
-with st.expander("How the cleaning cycle works", expanded=False):
+# Compact header, prominent tab bar that stays at the top while scrolling
+st.markdown(
+    """
+<style>
+  header[data-testid="stHeader"] { display: none; }
+  .block-container { padding-top: 1.5rem; }
+  /* tab bar: the prominent navigation row at the top */
+  div[data-testid="stTabs"] > div:first-child { padding: 0.2rem 0 0.6rem 0; }
+  div[data-testid="stTabs"] [role="tablist"] {
+      gap: 0.35rem; padding: 0.35rem; border-radius: 0.6rem; background: #e8eef7;
+  }
+  div[data-testid="stTabs"] [role="tab"] {
+      padding: 0.5rem 0.9rem; border-radius: 0.45rem;
+  }
+  div[data-testid="stTabs"] [role="tab"] p { font-size: 1.02rem; font-weight: 600; }
+  div[data-testid="stTabs"] [role="tab"][aria-selected="true"],
+  div[data-testid="stTabs"] [role="tab"][data-selected] {
+      background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  div[data-testid="stTabs"] .react-aria-SelectionIndicator { display: none; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+st.markdown("#### 🩺 CRF Rule Engine &nbsp;·&nbsp; <span style='font-weight:400;font-size:0.95rem;color:#555'>"
+            "Excel-driven plausibility checks for paper-CRF studies · "
+            "<b>runs in your browser, no file leaves this computer</b></span>",
+            unsafe_allow_html=True)
+
+tabs = st.tabs(["Overview", "Findings", "Site queries", "Corrections & audit trail",
+                "Rules", "SAS program", "How it works"])
+
+with tabs[6]:
     st.markdown(
         """
+### The cleaning cycle
+
 | | Artifact | Who maintains it | When |
 |---|---|---|---|
 | 1 | **Data validation plan** - rules sheet, one row per CRF field | data management, versioned | fixed at study start, changes documented |
@@ -66,15 +97,24 @@ with st.expander("How the cleaning cycle works", expanded=False):
 | 5 | **Correction log** - every change with who, what, when, why | data management | continuously |
 | 6 | **Audit trail** - which corrections were applied or rejected | generated | every run |
 
-Cleaned data = raw export + correction log. The raw export is never overwritten,
+**Cleaned data = raw export + correction log.** The raw export is never overwritten,
 so every number in the analysis can be traced back to the scanned form.
+A correction is applied only if the data still hold its `old_value`; otherwise it is
+rejected as a conflict.
+
+### Using this app
+1. Click **Load fictional demo study** in the sidebar, or upload your own files.
+2. *Overview* and *Findings* show what the rules found.
+3. *Site queries* gives one Excel file per site to send out.
+4. Answers go into the correction log; load it again and the answered queries disappear.
+5. *SAS program* shows the same checks as a plain SAS program.
 """
     )
 
 # ---------------------------------------------------------------- inputs
 with st.sidebar:
     st.header("Input")
-    if st.button("Load fictional demo study", width="stretch"):
+    if st.button("Load fictional demo study", width="stretch", type="primary"):
         st.session_state["demo"] = True
     up_rules = st.file_uploader("1  Data validation plan (rules .xlsx)", type=["xlsx"])
     up_raw = st.file_uploader("2  Raw scanner export (.csv, | separated)", type=["csv", "txt"])
@@ -90,21 +130,22 @@ raw_b = up_raw.getvalue() if up_raw else (demo_bytes("raw") if demo else None)
 log_b = up_log.getvalue() if up_log else (demo_bytes("log") if demo else None)
 
 if not (rules_b and raw_b):
-    st.info("Upload a rules sheet and a raw export in the sidebar, or click **Load fictional demo study**.")
+    for t in tabs[:6]:
+        with t:
+            st.info("Upload a rules sheet and a raw export in the sidebar, "
+                    "or click **Load fictional demo study**. New here? See the tab **How it works**.")
     st.stop()
 
 try:
     specs, result, issues = analyse(rules_b, raw_b, log_b, use_log)
 except Exception as exc:  # show the problem instead of a stack trace
-    st.error(f"Could not process the files: {exc}")
+    with tabs[0]:
+        st.error(f"Could not process the files: {exc}")
     st.stop()
 
 f, cleaned, audit = result.findings, result.cleaned, result.audit
 n = len(cleaned)
 n_bad = int((cleaned["_n_findings"] > 0).sum())
-
-tabs = st.tabs(["Overview", "Findings", "Queries to sites", "Corrections & audit trail",
-                "Rules (validation plan)", "SAS program"])
 
 # ---------------------------------------------------------------- overview
 with tabs[0]:
