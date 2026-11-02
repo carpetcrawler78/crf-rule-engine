@@ -7,8 +7,11 @@ year, yes/no questions with dependent dates, tick boxes where a scanner codes
 "several boxes ticked" as 8, free-text fields with dependent flags).
 
 Run:  python scripts/make_demo_data.py
-Writes rules/demo_fu12_rules.xlsx, data/demo_fu12_raw.csv and
-data/demo_fu12_injected_errors.csv (the ground truth used by the tests).
+Writes
+  rules/demo_fu12_rules.xlsx                 data validation plan (rules sheet)
+  data/demo_fu12_raw.csv                     synthetic scanner export
+  data/demo_fu12_injected_errors.csv         ground truth used by the tests
+  corrections/demo_fu12_corrections_log.xlsx answered queries + self-evident corrections
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ N_RECORDS = 300
 FIELDS = [
     ("id", "Participant ID", "4 digits", '+"0"N(4)',
      "# >= 1001 and # <= 1999", "ID outside the assigned range 1001-1999"),
+    ("site", "Study site (clinic)", "S01-S04", '-" "X(3)',
+     '# in ("S01","S02","S03","S04")', "Unknown study site"),
     ("fu12_day", "Q0 Date of completion: day", "1-31", '+"0"N(0-2)',
      "# >= 1 and ((fu12_month in (1,3,5,7,8,10,12) and # <= 31) or (fu12_month in (4,6,9,11) and # <= 30) "
      "or (fu12_month = 2 and # <= 29))", "Day does not exist in this month"),
@@ -88,6 +93,22 @@ DIAGNOSES = ["Type 2 diabetes", "Atrial fibrillation", "Osteoporosis", "Cataract
 MEDS = ["Metformin", "Ramipril", "Bisoprolol", "Atorvastatin", "Levothyroxine", "Pantoprazole",
         "Vitamin D", "Apixaban", "Ibuprofen as needed"]
 USERS = ["scan_ab", "scan_cd", "scan_ef"]
+SITES = ["S01", "S02", "S03", "S04"]
+
+# How the query was resolved, per type of error (used for the demo correction log)
+RESOLUTION = {
+    "multi_tick": ("query", "Site checked the paper form: one of the two crosses was crossed out"),
+    "bad_day": ("query", "Site checked the paper form: date misread by the scanner"),
+    "age": ("query", "Site checked the paper form: digit misread"),
+    "hosp_no_with_date": ("query", "Site confirmed with participant"),
+    "falls_without_fall": ("query", "Site checked the paper form"),
+    "dx_text_without_yes": ("query", "Site confirmed with participant"),
+    "daily_without_name": ("query", "Site checked the paper form: medication name not scanned"),
+    "weight": ("query", "Site checked the paper form: digit misread"),
+    "not_numeric": ("SEC", "Self-evident correction per data handling plan: text in numeric field"),
+    "scan_before_form": ("SEC", "Self-evident correction: scan date taken from scan log"),
+    "id": ("query", "Site confirmed the participant ID from the screening log"),
+}
 
 
 def write_rules(path: Path) -> None:
@@ -143,7 +164,7 @@ def write_rules(path: Path) -> None:
 def plausible_record(rng: random.Random, pid: int) -> dict[str, str]:
     d = date(2025, 1, 1) + timedelta(days=rng.randint(0, 600))
     r: dict[str, str] = {name: "" for name, *_ in FIELDS}
-    r.update(id=f"{pid:04d}", fu12_day=str(d.day), fu12_month=str(d.month), fu12_year=str(d.year),
+    r.update(id=f"{pid:04d}", site=rng.choices(SITES, weights=[40, 25, 20, 15])[0], fu12_day=str(d.day), fu12_month=str(d.month), fu12_year=str(d.year),
              fu12_age=str(rng.randint(65, 92)), fu12_health=str(rng.randint(1, 7)))
     for s in "abcd":
         r[f"fu12_sym_{s}"] = str(rng.randint(1, 4)) if rng.random() > 0.05 else ""
@@ -235,21 +256,65 @@ INJECTORS = [_inj_multi_tick, _inj_bad_day, _inj_age, _inj_hosp_no_with_date, _i
              _inj_scan_before_form, _inj_id]
 
 
+def write_corrections(path: Path, rows: list[dict[str, str]]) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "corrections"
+    cols = ["correction_id", "query_id", "id", "variable", "old_value", "new_value",
+            "reason", "source", "date", "changed_by"]
+    ws.append(cols)
+    for r in rows:
+        ws.append([r[c] for c in cols])
+    for c in ws[1]:
+        c.font, c.fill = Font(bold=True), PatternFill("solid", fgColor="DCE6F1")
+    for col, width in zip("ABCDEFGHIJ", (13, 22, 8, 16, 12, 12, 70, 8, 12, 14)):
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
 def main() -> None:
     rng = random.Random(SEED)
-    records, truth = [], []
+    records, truth, corrections = [], [], []
+    day = date(2026, 9, 1)
     for pid in range(1001, 1001 + N_RECORDS):
         r = plausible_record(rng, pid)
         if rng.random() < 0.18:
+            original = dict(r)
             hits = []
             chosen = rng.sample(INJECTORS, k=rng.choice([1, 1, 2]))
             if _inj_bad_day in chosen and _inj_scan_before_form in chosen:
                 chosen.remove(_inj_scan_before_form)  # an impossible date cannot be compared
             for inj in chosen:
                 hits += [(var, inj.__name__[5:]) for var in inj(r, rng)]
+            # about 60 % of the queries are already answered -> correction log
+            answered = rng.random() < 0.6
             # record ground truth with the final ID (the ID itself may be broken)
-            truth += [{"id": r["id"], "variable": v, "injected_by": how} for v, how in hits]
+            truth += [{"id": r["id"], "variable": v, "injected_by": how, "answered": "yes" if answered else "no"}
+                      for v, how in hits]
+            if answered:
+                day += timedelta(days=rng.randint(0, 2))
+                qid = f"Q-{r['id']}-{hits[0][0]}"
+                source, reason = RESOLUTION[hits[0][1]]
+                for var in [k for k in r if r[k] != original[k]]:
+                    corrections.append({
+                        "correction_id": f"C-{len(corrections) + 1:04d}", "query_id": qid if source == "query" else "",
+                        "id": r["id"], "variable": var, "old_value": r[var], "new_value": original[var],
+                        "reason": reason, "source": source, "date": day.isoformat(),
+                        "changed_by": "DM" if source == "SEC" else f"site {r['site']}",
+                    })
         records.append(r)
+
+    # one correction that no longer fits the data -> must be reported as conflict, not applied
+    clean = next(r for r in records if r["fu12_weight"] and not any(t["id"] == r["id"] for t in truth))
+    corrections.append({
+        "correction_id": f"C-{len(corrections) + 1:04d}", "query_id": f"Q-{clean['id']}-fu12_weight",
+        "id": clean["id"], "variable": "fu12_weight", "old_value": str(int(clean["fu12_weight"]) + 10),
+        "new_value": "77", "reason": "Answer referred to an older scan of the form", "source": "query",
+        "date": (day + timedelta(days=1)).isoformat(), "changed_by": f"site {clean['site']}",
+    })
 
     names = [f[0] for f in FIELDS]
     raw = ROOT / "data" / "demo_fu12_raw.csv"
@@ -259,12 +324,13 @@ def main() -> None:
         w.writeheader()
         w.writerows(records)
     with (ROOT / "data" / "demo_fu12_injected_errors.csv").open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=["id", "variable", "injected_by"])
+        w = csv.DictWriter(fh, fieldnames=["id", "variable", "injected_by", "answered"])
         w.writeheader()
         w.writerows(truth)
     write_rules(ROOT / "rules" / "demo_fu12_rules.xlsx")
-    print(f"{len(records)} records, {len(truth)} injected errors in "
-          f"{len({t['id'] for t in truth})} records")
+    write_corrections(ROOT / "corrections" / "demo_fu12_corrections_log.xlsx", corrections)
+    print(f"{len(records)} records, {len(truth)} injected errors in {len({t['id'] for t in truth})} records, "
+          f"{len(corrections)} corrections in the log")
 
 
 if __name__ == "__main__":
