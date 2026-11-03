@@ -1,8 +1,10 @@
 # crf-rule-engine
 
+**English** · [Deutsch](README.de.md)
+
 **Plausibility checks for paper-CRF studies, maintained in Excel instead of code, with queries to sites and a full audit trail.**
 
-**Live app:** `docs/index.html` (Streamlit running in the browser via stlite). Once GitHub Pages is switched on, it is at `https://carpetcrawler78.github.io/crf-rule-engine/`. Nothing is uploaded, because Python runs inside the page.
+**▶ Live app: [carpetcrawler78.github.io/crf-rule-engine](https://carpetcrawler78.github.io/crf-rule-engine/)** – click *Load fictional demo study*. Streamlit runs entirely in your browser (stlite); nothing is uploaded, because Python runs inside the page. The first start takes about 20 s.
 
 > **Background.** I first built this as a SAS tool for the paper questionnaires of a multicentre clinical study (2025). This repository is a fresh re-implementation of the idea: a fictional study, synthetic data, and new code. It contains no original study code, data or variable definitions.
 

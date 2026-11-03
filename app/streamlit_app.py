@@ -11,6 +11,7 @@ import io
 import sys
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -161,7 +162,16 @@ with tabs[0]:
         left, right = st.columns(2)
         with left:
             st.subheader("Findings per field")
-            st.bar_chart(f["variable"].value_counts().sort_values())
+            per_field = (f["variable"].replace({"id": "Participant ID"}).value_counts()
+                         .rename_axis("field").reset_index(name="findings"))
+            st.altair_chart(
+                alt.Chart(per_field).mark_bar().encode(
+                    x=alt.X("field:N", sort="-y", title=None),
+                    y=alt.Y("findings:Q", title="Findings", axis=alt.Axis(tickMinStep=1)),
+                    tooltip=["field", "findings"],
+                ),
+                width="stretch",
+            )
         with right:
             st.subheader("Open queries per site")
             st.bar_chart(f.groupby("site")["id"].nunique().rename("participants"))
